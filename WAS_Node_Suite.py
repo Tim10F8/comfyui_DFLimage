@@ -5292,7 +5292,7 @@ class DFL_Load_Image_Batch:
     RETURN_NAMES = ("image","filename_text","DFL_meta_data")
     FUNCTION = "load_batch_images"
 
-    CATEGORY = "DFL Suite/IO"
+    CATEGORY = "DFL Suite"
 
     def load_batch_images(self, path, pattern='*', index=0, mode="single_image", seed=0, label='Batch 001', allow_RGBA_output='false', filename_text_extension='true'):
 
@@ -7319,7 +7319,7 @@ class DFL_Image_Save:
                 "filename_delimiter": ("STRING", {"default":"_"}),
                 "filename_number_padding": ("INT", {"default":4, "min":1, "max":9, "step":1}),
                 "filename_number_start": (["false", "true"],),
-                "extension": (['png', 'jpg', 'jpeg', 'gif', 'tiff', 'webp', 'bmp'], ),
+                "extension": (['jpg'], ),
                 "dpi": ("INT", {"default": 300, "min": 1, "max": 2400, "step": 1}),
                 "quality": ("INT", {"default": 100, "min": 1, "max": 100, "step": 1}),
                 "optimize_image": (["true", "false"],),
@@ -7345,7 +7345,7 @@ class DFL_Image_Save:
 
     OUTPUT_NODE = True
 
-    CATEGORY = "DFL Suite/IO"
+    CATEGORY = "DFL Suite"
     def was_save_images(self, images, DFL_meta_data=None, output_path='', filename_prefix="ComfyUI", filename_delimiter='_',
                         extension='jpg', dpi=96, quality=100, optimize_image="true", lossless_webp="false", prompt=None, extra_pnginfo=None,
                         overwrite_mode='false', filename_number_padding=4, filename_number_start='false',
@@ -7578,7 +7578,7 @@ class WAS_Image_Send_HTTP:
     FUNCTION = "was_send_images_http"
     OUTPUT_NODE = True
 
-    CATEGORY = "DFL Suite/IO"
+    CATEGORY = "DFL Suite"
 
     def was_send_images_http(self, images, url="example.com",
                              method_type="post",
@@ -7630,7 +7630,7 @@ class DFL_Load_Image:
     RETURN_NAMES = ("image", "mask", "filename_text", "DFL_meta_data")
     FUNCTION = "load_image"
 
-    CATEGORY = "DFL Suite/IO"
+    CATEGORY = "DFL Suite"
 
     def load_image(self, image_path, RGBA='false', filename_text_extension="true"):
 
@@ -10828,7 +10828,7 @@ class WAS_Text_Save:
     OUTPUT_NODE = True
     RETURN_TYPES = ()
     FUNCTION = "save_text_file"
-    CATEGORY = "DFL Suite/IO"
+    CATEGORY = "DFL Suite"
 
     def save_text_file(self, text, path, filename_prefix='ComfyUI', filename_delimiter='_', 
                        filename_number_padding=4, file_extension='.txt', encoding='utf-8', filename_suffix=''):
@@ -11185,7 +11185,7 @@ class WAS_Text_Load_From_File:
     RETURN_TYPES = (TEXT_TYPE,"DICT")
     FUNCTION = "load_file"
 
-    CATEGORY = "DFL Suite/IO"
+    CATEGORY = "DFL Suite"
 
     def load_file(self, file_path='', dictionary_name='[filename]]'):
 
@@ -14237,7 +14237,7 @@ class WAS_Cache:
     FUNCTION = "cache_input"
     OUTPUT_NODE = True
 
-    CATEGORY = "DFL Suite/IO"
+    CATEGORY = "DFL Suite"
 
     def cache_input(self, latent_suffix="_cache", image_suffix="_cache", conditioning_suffix="_cache", output_path=None, latent=None, image=None, conditioning=None):
 
@@ -14301,7 +14301,7 @@ class WAS_Load_Cache:
     RETURN_NAMES = ("LATENT","IMAGE","CONDITIONING")
     FUNCTION = "load_cache"
 
-    CATEGORY = "DFL Suite/IO"
+    CATEGORY = "DFL Suite"
 
     def load_cache(self, latent_path=None, image_path=None, conditioning_path=None):
 
