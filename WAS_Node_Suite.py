@@ -46,20 +46,16 @@ import datetime
 import time
 import torch
 from tqdm import tqdm
-try:
-    from .DFLIMG.DFLJPG import DFLJPG
-except ImportError:
-    DFLJPG = None
-    cstr("DFLJPG module not found, DFL features will be disabled").warning.print()
+from .DFLIMG.DFLJPG import DFLJPG
 
 p310_plus = (sys.version_info >= (3, 10))
 
 MANIFEST = {
-    "name": "DFL Node Suite",
+    "name": "WAS Node Suite",
     "version": (2,2,2),
-    "author": "WASasquatch + 滚石",
-    "project": "https://github.com/Arthurzhangsheng/comfyui_DFLimage",
-    "description": "An deepfacelab extensive node suite for ComfyUI ",
+    "author": "WASasquatch",
+    "project": "https://github.com/WASasquatch/was-node-suite-comfyui",
+    "description": "An extensive node suite for ComfyUI with over 180 new nodes",
 }
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "was_node_suite_comfyui"))
@@ -5271,7 +5267,7 @@ class WAS_Image_Rescale:
 
 # LOAD IMAGE BATCH
 
-class WAS_Load_Image_Batch:
+class DFL_Load_Image_Batch:
     def __init__(self):
         self.HDB = WASDatabase(WAS_HISTORY_DATABASE)
 
@@ -5292,8 +5288,8 @@ class WAS_Load_Image_Batch:
             }
         }
 
-    RETURN_TYPES = ("IMAGE",TEXT_TYPE, "DFLdata")
-    RETURN_NAMES = ("image","filename_text", "DFL_meta_data")
+    RETURN_TYPES = ("IMAGE",TEXT_TYPE,"DFLdata")
+    RETURN_NAMES = ("image","filename_text","DFL_meta_data")
     FUNCTION = "load_batch_images"
 
     CATEGORY = "DFL Suite/IO"
@@ -5303,26 +5299,27 @@ class WAS_Load_Image_Batch:
         allow_RGBA_output = (allow_RGBA_output == 'true')
 
         if not os.path.exists(path):
-            return (None, None, None)
+            return (None, )
         fl = self.BatchImageLoader(path, label, pattern)
         new_paths = fl.image_paths
         if mode == 'single_image':
-            image, filename, DFL_dict = fl.get_image_by_id(index)
+            image, filename, DFLdata = fl.get_image_by_id(index)
             if image == None:
                 cstr(f"No valid image was found for the inded `{index}`").error.print()
                 return (None, None, None)
         elif mode == 'incremental_image':
-            image, filename, DFL_dict = fl.get_next_image()
+            image, filename, DFLdata = fl.get_next_image()
             if image == None:
                 cstr(f"No valid image was found for the next ID. Did you remove images from the source directory?").error.print()
                 return (None, None, None)
         else:
             random.seed(seed)
             newindex = int(random.random() * len(fl.image_paths))
-            image, filename, DFL_dict = fl.get_image_by_id(newindex)
+            image, filename, DFLdata = fl.get_image_by_id(newindex)
             if image == None:
                 cstr(f"No valid image was found for the next ID. Did you remove images from the source directory?").error.print()
                 return (None, None, None)
+
 
         # Update history
         update_history_images(new_paths)
@@ -5333,7 +5330,7 @@ class WAS_Load_Image_Batch:
         if filename_text_extension == "false":
             filename = os.path.splitext(filename)[0]
 
-        return (pil2tensor(image), filename, DFL_dict)
+        return (pil2tensor(image), filename, DFLdata)
 
     class BatchImageLoader:
         def __init__(self, directory_path, label, pattern):
@@ -5361,19 +5358,16 @@ class WAS_Load_Image_Batch:
         def get_image_by_id(self, image_id):
             if image_id < 0 or image_id >= len(self.image_paths):
                 cstr(f"Invalid image index `{image_id}`").error.print()
-                return None, None, None
+                return
             i = Image.open(self.image_paths[image_id])
             i = ImageOps.exif_transpose(i)
-            # DFL图片专门处理，读取已有的DFL信息
-            DFL_dict = None
-            if DFLJPG:
-                try:
-                    InputDflImg = DFLJPG.load(self.image_paths[image_id])
-                    if InputDflImg and InputDflImg.has_data():
-                        DFL_dict = InputDflImg.get_dict()
-                except:
-                    DFL_dict = None
-            # DFL处理结束
+            #------------dfl图片专门处理，读取已有的dfl信息------------
+            InputDflImg = DFLJPG.load(self.image_paths[image_id])
+            if not InputDflImg or not InputDflImg.has_data():
+                DFL_dict = None
+            else:
+                DFL_dict = InputDflImg.get_dict()
+            #-------------------------------------------------------
             return (i, os.path.basename(self.image_paths[image_id]), DFL_dict)
 
         def get_next_image(self):
@@ -5387,17 +5381,32 @@ class WAS_Load_Image_Batch:
             self.WDB.insert('Batch Counters', self.label, self.index)
             i = Image.open(image_path)
             i = ImageOps.exif_transpose(i)
-            # DFL图片专门处理，读取已有的DFL信息
-            DFL_dict = None
-            if DFLJPG:
-                try:
-                    InputDflImg = DFLJPG.load(image_path)
-                    if InputDflImg and InputDflImg.has_data():
-                        DFL_dict = InputDflImg.get_dict()
-                except:
-                    DFL_dict = None
-            # DFL处理结束
+            #------------dfl图片专门处理，读取已有的dfl信息------------
+            InputDflImg = DFLJPG.load(image_path)
+            if not InputDflImg or not InputDflImg.has_data():
+                DFL_dict = None
+            else:
+                DFL_dict = InputDflImg.get_dict()
+            #-------------------------------------------------------
             return (i, os.path.basename(image_path), DFL_dict)
+
+        def get_current_image(self):
+            if self.index >= len(self.image_paths):
+                self.index = 0
+            image_path = self.image_paths[self.index]
+            return os.path.basename(image_path)
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        if kwargs['mode'] != 'single_image':
+            return float("NaN")
+        else:
+            fl = DFL_Load_Image_Batch.BatchImageLoader(kwargs['path'], kwargs['label'], kwargs['pattern'])
+            filename = fl.get_current_image()
+            image = os.path.join(kwargs['path'], filename)
+            sha = get_sha256(image)
+            return sha
+
 
 # IMAGE HISTORY NODE
 
@@ -7296,7 +7305,7 @@ class WAS_Export_API:
 # Image Save (NSP Compatible)
 # Originally From ComfyUI/nodes.py
 
-class WAS_Image_Save:
+class DFL_Image_Save:
     def __init__(self):
         self.output_dir = comfy_paths.output_directory
         self.type = 'output'
@@ -7337,12 +7346,11 @@ class WAS_Image_Save:
     OUTPUT_NODE = True
 
     CATEGORY = "DFL Suite/IO"
-
-    def was_save_images(self, images, output_path='', filename_prefix="ComfyUI", filename_delimiter='_',
-                        extension='png', dpi=96, quality=100, optimize_image="true", lossless_webp="false", prompt=None, extra_pnginfo=None,
+    def was_save_images(self, images, DFL_meta_data=None, output_path='', filename_prefix="ComfyUI", filename_delimiter='_',
+                        extension='jpg', dpi=96, quality=100, optimize_image="true", lossless_webp="false", prompt=None, extra_pnginfo=None,
                         overwrite_mode='false', filename_number_padding=4, filename_number_start='false',
                         show_history='false', show_history_by_prefix="true", embed_workflow="true",
-                        show_previews="true", DFL_meta_data=None):
+                        show_previews="true"):
 
         delimiter = filename_delimiter
         number_padding = filename_number_padding
@@ -7393,11 +7401,17 @@ class WAS_Image_Save:
         else:
             counter = 1
 
+        # Set initial counter value
+        if existing_counters:
+            counter = existing_counters[0] + 1
+        else:
+            counter = 1
+
         # Set Extension
         file_extension = '.' + extension
         if file_extension not in ALLOWED_EXT:
             cstr(f"The extension `{extension}` is not valid. The valid formats are: {', '.join(sorted(ALLOWED_EXT))}").error.print()
-            file_extension = ".png"
+            file_extension = "jpg"
 
         results = list()
         output_files = list()
@@ -7446,15 +7460,11 @@ class WAS_Image_Save:
                 if extension in ["jpg", "jpeg"]:
                     img.save(output_file,
                              quality=quality, optimize=optimize_image, dpi=(dpi, dpi))
-                    # DFL图片专门处理，保存原有的DFL信息
-                    if DFL_meta_data is not None and DFLJPG:
-                        try:
-                            OutputDflImg = DFLJPG.load(output_file)
-                            OutputDflImg.set_dict(DFL_meta_data)
-                            OutputDflImg.save()
-                        except Exception as e:
-                            cstr(f"Failed to save DFL metadata: {e}").warning.print()
-                    # DFL处理结束
+                    #------------dfl图片专门处理，保存原有的dfl信息------------
+                    OutputDflImg = DFLJPG.load(output_file)
+                    OutputDflImg.set_dict(DFL_meta_data)
+                    OutputDflImg.save()
+                    #-------------------------------------------------------
                 elif extension == 'webp':
                     img.save(output_file,
                              quality=quality, lossless=lossless_webp, exif=exif_data)
@@ -7469,6 +7479,81 @@ class WAS_Image_Save:
                 else:
                     img.save(output_file,
                              pnginfo=exif_data, optimize=optimize_image)
+
+                cstr(f"Image file saved to: {output_file}").msg.print()
+                output_files.append(output_file)
+
+                if show_history != 'true' and show_previews == 'true':
+                    subfolder = self.get_subfolder_path(output_file, original_output)
+                    results.append({
+                        "filename": file,
+                        "subfolder": subfolder,
+                        "type": self.type
+                    })
+
+                # Update the output image history
+                update_history_output_images(output_file)
+
+            except OSError as e:
+                cstr(f'Unable to save file to: {output_file}').error.print()
+                print(e)
+            except Exception as e:
+                cstr('Unable to save file due to the to the following error:').error.print()
+                print(e)
+
+            if overwrite_mode == 'false':
+                counter += 1
+
+        filtered_paths = []
+        if show_history == 'true' and show_previews == 'true':
+            HDB = WASDatabase(WAS_HISTORY_DATABASE)
+            conf = getSuiteConfig()
+            if HDB.catExists("History") and HDB.keyExists("History", "Output_Images"):
+                history_paths = HDB.get("History", "Output_Images")
+            else:
+                history_paths = None
+
+            if history_paths:
+
+                for image_path in history_paths:
+                    image_subdir = self.get_subfolder_path(image_path, self.output_dir)
+                    current_subdir = self.get_subfolder_path(output_file, self.output_dir)
+                    if not os.path.exists(image_path):
+                        continue
+                    if show_history_by_prefix == 'true' and image_subdir != current_subdir:
+                        continue
+                    if show_history_by_prefix == 'true' and not os.path.basename(image_path).startswith(filename_prefix):
+                        continue
+                    filtered_paths.append(image_path)
+
+                if conf.__contains__('history_display_limit'):
+                    filtered_paths = filtered_paths[-conf['history_display_limit']:]
+
+                filtered_paths.reverse()
+
+        if filtered_paths:
+            for image_path in filtered_paths:
+                subfolder = self.get_subfolder_path(image_path, self.output_dir)
+                image_data = {
+                    "filename": os.path.basename(image_path),
+                    "subfolder": subfolder,
+                    "type": self.type
+                }
+                results.append(image_data)
+
+        if show_previews == 'true':
+            return {"ui": {"images": results, "files": output_files}, "result": (images, output_files,)}
+        else:
+            return {"ui": {"images": []}, "result": (images, output_files,)}
+
+    def get_subfolder_path(self, image_path, output_path):
+        output_parts = output_path.strip(os.sep).split(os.sep)
+        image_parts = image_path.strip(os.sep).split(os.sep)
+        common_parts = os.path.commonprefix([output_parts, image_parts])
+        subfolder_parts = image_parts[len(common_parts):]
+        subfolder_path = os.sep.join(subfolder_parts[:-1])
+        return subfolder_path
+
 
 # Image Send HTTP
 # Sends images over http
@@ -7522,7 +7607,8 @@ class WAS_Image_Send_HTTP:
 
 
 # LOAD IMAGE NODE
-class WAS_Load_Image:
+# LOAD IMAGE NODE
+class DFL_Load_Image:
 
     def __init__(self):
         self.input_dir = comfy_paths.input_directory
@@ -7559,15 +7645,13 @@ class WAS_Load_Image:
             try:
                 i = Image.open(image_path)
                 i = ImageOps.exif_transpose(i)
-                # DFL图片处理，读取已有的DFL信息
-                if DFLJPG:
-                    try:
-                        InputDflImg = DFLJPG.load(image_path)
-                        if InputDflImg and InputDflImg.has_data():
-                            DFL_dict = InputDflImg.get_dict()
-                    except:
-                        DFL_dict = None
-                # DFL图片处理结束
+                #-------------------------DFL图片处理------------
+                InputDflImg = DFLJPG.load(image_path)
+                if not InputDflImg or not InputDflImg.has_data():
+                    DFL_dict = None
+                else:
+                    DFL_dict = InputDflImg.get_dict()
+                #-------------------------DFL图片处理------------
             except OSError:
                 cstr(f"The image `{image_path.strip()}` specified doesn't exist!").error.print()
                 i = Image.new(mode='RGB', size=(512, 512), color=(0, 0, 0))
@@ -14331,226 +14415,10 @@ class WAS_Integer_Place_Counter:
 
 # NODE MAPPING
 NODE_CLASS_MAPPINGS = {
-    "BLIP Model Loader": WAS_BLIP_Model_Loader,
-    "Blend Latents": WAS_Blend_Latents,
-    "Bus Node": WAS_Bus,
-    "Cache Node": WAS_Cache,
-    "Checkpoint Loader": WAS_Checkpoint_Loader,
-    "Checkpoint Loader (Simple)": WAS_Checkpoint_Loader_Simple,
-    "CLIPTextEncode (NSP)": WAS_NSP_CLIPTextEncoder,
-    "CLIP Input Switch": WAS_CLIP_Input_Switch,
-    "CLIP Vision Input Switch": WAS_CLIP_Vision_Input_Switch,
-    "Conditioning Input Switch": WAS_Conditioning_Input_Switch,
-    "Constant Number": WAS_Constant_Number,
-    "Create Grid Image": WAS_Image_Grid_Image,
-    "Create Grid Image from Batch": WAS_Image_Grid_Image_Batch,
-    "Create Morph Image": WAS_Image_Morph_GIF,
-    "Create Morph Image from Path": WAS_Image_Morph_GIF_By_Path,
-    "Create Video from Path": WAS_Create_Video_From_Path,
-    "CLIPSeg Masking": WAS_CLIPSeg,
-    "CLIPSeg Model Loader": WAS_CLIPSeg_Model_Loader,
-    "CLIPSeg Batch Masking": WAS_CLIPSeg_Batch,
-    "Convert Masks to Images": WAS_Mask_To_Image,
-    "Control Net Model Input Switch": WAS_Control_Net_Input_Switch,
-    "Debug Number to Console": WAS_Debug_Number_to_Console,
-    "Dictionary to Console": WAS_Dictionary_To_Console,
-    "Diffusers Model Loader": WAS_Diffusers_Loader,
-    "Diffusers Hub Model Down-Loader": WAS_Diffusers_Hub_Model_Loader,
-    "Export API": WAS_Export_API,
-    "Latent Input Switch": WAS_Latent_Input_Switch,
-    "Load Cache": WAS_Load_Cache,
-    "Logic Boolean": WAS_Boolean,
-    "Logic Boolean Primitive": WAS_Boolean_Primitive,
-    "Logic Comparison OR": WAS_Logical_OR,
-    "Logic Comparison AND": WAS_Logical_AND,
-    "Logic Comparison XOR": WAS_Logical_XOR,
-    "Logic NOT": WAS_Logical_NOT,
-    "Lora Loader": WAS_Lora_Loader,
-    "Hex to HSL": WAS_Hex_to_HSL,
-    "HSL to Hex": WAS_HSL_to_Hex,
-    "Image SSAO (Ambient Occlusion)": WAS_Image_Ambient_Occlusion,
-    "Image SSDO (Direct Occlusion)": WAS_Image_Direct_Occlusion,
-    "Image Analyze": WAS_Image_Analyze,
-    "Image Aspect Ratio": WAS_Image_Aspect_Ratio,
-    "Image Batch": WAS_Image_Batch,
-    "Image Blank": WAS_Image_Blank,
-    "Image Blend by Mask": WAS_Image_Blend_Mask,
-    "Image Blend": WAS_Image_Blend,
-    "Image Blending Mode": WAS_Image_Blending_Mode,
-    "Image Bloom Filter": WAS_Image_Bloom_Filter,
-    "Image Canny Filter": WAS_Canny_Filter,
-    "Image Chromatic Aberration": WAS_Image_Chromatic_Aberration,
-    "Image Color Palette": WAS_Image_Color_Palette,
-    "Image Crop Face": WAS_Image_Crop_Face,
-    "Image Crop Location": WAS_Image_Crop_Location,
-    "Image Crop Square Location": WAS_Image_Crop_Square_Location,
-    "Image Displacement Warp": WAS_Image_Displacement_Warp,
-    "Image Lucy Sharpen": WAS_Lucy_Sharpen,
-    "Image Paste Face": WAS_Image_Paste_Face_Crop,
-    "Image Paste Crop": WAS_Image_Paste_Crop,
-    "Image Paste Crop by Location": WAS_Image_Paste_Crop_Location,
-    "Image Pixelate": WAS_Image_Pixelate,
-    "Image Power Noise": WAS_Image_Power_Noise,
-    "Image Dragan Photography Filter": WAS_Dragon_Filter,
-    "Image Edge Detection Filter": WAS_Image_Edge,
-    "Image Film Grain": WAS_Film_Grain,
-    "Image Filter Adjustments": WAS_Image_Filters,
-    "Image Flip": WAS_Image_Flip,
-    "Image Gradient Map": WAS_Image_Gradient_Map,
-    "Image Generate Gradient": WAS_Image_Generate_Gradient,
-    "Image High Pass Filter": WAS_Image_High_Pass_Filter,
-    "Image History Loader": WAS_Image_History,
-    "Image Input Switch": WAS_Image_Input_Switch,
-    "Image Levels Adjustment": WAS_Image_Levels,
-    "Image Load": WAS_Load_Image,
-    "Image Median Filter": WAS_Image_Median_Filter,
-    "Image Mix RGB Channels": WAS_Image_RGB_Merge,
-    "Image Monitor Effects Filter": WAS_Image_Monitor_Distortion_Filter,
-    "Image Nova Filter": WAS_Image_Nova_Filter,
-    "Image Padding": WAS_Image_Padding,
-    "Image Perlin Noise": WAS_Image_Perlin_Noise,
-    "Image Rembg (Remove Background)": WAS_Remove_Rembg,
-    "Image Perlin Power Fractal": WAS_Image_Perlin_Power_Fractal,
-    "Image Remove Background (Alpha)": WAS_Remove_Background,
-    "Image Remove Color": WAS_Image_Remove_Color,
-    "Image Resize": WAS_Image_Rescale,
-    "Image Rotate": WAS_Image_Rotate,
-    "Image Rotate Hue": WAS_Image_Rotate_Hue,
-    "Image Send HTTP": WAS_Image_Send_HTTP,
-    "Image Save": WAS_Image_Save,
-    "Image Seamless Texture": WAS_Image_Make_Seamless,
-    "Image Select Channel": WAS_Image_Select_Channel,
-    "Image Select Color": WAS_Image_Select_Color,
-    "Image Shadows and Highlights": WAS_Shadow_And_Highlight_Adjustment,
-    "Image Size to Number": WAS_Image_Size_To_Number,
-    "Image Stitch": WAS_Image_Stitch,
-    "Image Style Filter": WAS_Image_Style_Filter,
-    "Image Threshold": WAS_Image_Threshold,
-    "Image Tiled": WAS_Image_Tile_Batch,
-    "Image Transpose": WAS_Image_Transpose,
-    "Image fDOF Filter": WAS_Image_fDOF,
-    "Image to Latent Mask": WAS_Image_To_Mask,
-    "Image to Noise": WAS_Image_To_Noise,
-    "Image to Seed": WAS_Image_To_Seed,
-    "Images to RGB": WAS_Images_To_RGB,
-    "Images to Linear": WAS_Images_To_Linear,
-    "Integer place counter": WAS_Integer_Place_Counter,
-    "Image Voronoi Noise Filter": WAS_Image_Voronoi_Noise_Filter,
-    "KSampler (WAS)": WAS_KSampler,
-    "KSampler Cycle": WAS_KSampler_Cycle,
-    "Latent Batch": WAS_Latent_Batch,
-    "Latent Noise Injection": WAS_Latent_Noise,
-    "Latent Size to Number": WAS_Latent_Size_To_Number,
-    "Latent Upscale by Factor (WAS)": WAS_Latent_Upscale,
-    "Load Image Batch": WAS_Load_Image_Batch,
-    "Load Text File": WAS_Text_Load_From_File,
-    "Load Lora": WAS_Lora_Loader,
-    "Lora Input Switch": WAS_Lora_Input_Switch,
-    "Masks Add": WAS_Mask_Add,
-    "Masks Subtract": WAS_Mask_Subtract,
-    "Mask Arbitrary Region": WAS_Mask_Arbitrary_Region,
-    "Mask Batch to Mask": WAS_Mask_Batch_to_Single_Mask,
-    "Mask Batch": WAS_Mask_Batch,
-    "Mask Ceiling Region": WAS_Mask_Ceiling_Region,
-    "Mask Crop Dominant Region": WAS_Mask_Crop_Dominant_Region,
-    "Mask Crop Minority Region": WAS_Mask_Crop_Minority_Region,
-    "Mask Crop Region": WAS_Mask_Crop_Region,
-    "Mask Paste Region": WAS_Mask_Paste_Region,
-    "Mask Dilate Region": WAS_Mask_Dilate_Region,
-    "Mask Dominant Region": WAS_Mask_Dominant_Region,
-    "Mask Erode Region": WAS_Mask_Erode_Region,
-    "Mask Fill Holes": WAS_Mask_Fill_Region,
-    "Mask Floor Region": WAS_Mask_Floor_Region,
-    "Mask Gaussian Region": WAS_Mask_Gaussian_Region,
-    "Mask Invert": WAS_Mask_Invert,
-    "Mask Minority Region": WAS_Mask_Minority_Region,
-    "Mask Rect Area": WAS_Mask_Rect_Area,
-    "Mask Rect Area (Advanced)": WAS_Mask_Rect_Area_Advanced,
-    "Mask Smooth Region": WAS_Mask_Smooth_Region,
-    "Mask Threshold Region": WAS_Mask_Threshold_Region,
-    "Masks Combine Regions": WAS_Mask_Combine,
-    "Masks Combine Batch": WAS_Mask_Combine_Batch,
-    "MiDaS Model Loader": MiDaS_Model_Loader,
-    "MiDaS Depth Approximation": MiDaS_Depth_Approx,
-    "MiDaS Mask Image": MiDaS_Background_Foreground_Removal,
-    "Model Input Switch": WAS_Model_Input_Switch,
-    "Number Counter": WAS_Number_Counter,
-    "Number Operation": WAS_Number_Operation,
-    "Number to Float": WAS_Number_To_Float,
-    "Number Input Switch": WAS_Number_Input_Switch,
-    "Number Input Condition": WAS_Number_Input_Condition,
-    "Number Multiple Of": WAS_Number_Multiple_Of,
-    "Number PI": WAS_Number_PI,
-    "Number to Int": WAS_Number_To_Int,
-    "Number to Seed": WAS_Number_To_Seed,
-    "Number to String": WAS_Number_To_String,
-    "Number to Text": WAS_Number_To_Text,
-    "Boolean To Text": WAS_Boolean_To_Text,
-    "Prompt Styles Selector": WAS_Prompt_Styles_Selector,
-    "Prompt Multiple Styles Selector": WAS_Prompt_Multiple_Styles_Selector,
-    "Random Number": WAS_Random_Number,
-    "Save Text File": WAS_Text_Save,
-    "Seed": WAS_Seed,
-    "Tensor Batch to Image": WAS_Tensor_Batch_to_Image,
-    "BLIP Analyze Image": WAS_BLIP_Analyze_Image,
-    "SAM Model Loader": WAS_SAM_Model_Loader,
-    "SAM Parameters": WAS_SAM_Parameters,
-    "SAM Parameters Combine": WAS_SAM_Combine_Parameters,
-    "SAM Image Mask": WAS_SAM_Image_Mask,
-    "Samples Passthrough (Stat System)": WAS_Samples_Passthrough_Stat_System,
-    "String to Text": WAS_String_To_Text,
-    "Image Bounds": WAS_Image_Bounds,
-    "Inset Image Bounds": WAS_Inset_Image_Bounds,
-    "Bounded Image Blend": WAS_Bounded_Image_Blend,
-    "Bounded Image Blend with Mask": WAS_Bounded_Image_Blend_With_Mask,
-    "Bounded Image Crop": WAS_Bounded_Image_Crop,
-    "Bounded Image Crop with Mask": WAS_Bounded_Image_Crop_With_Mask,
-    "Image Bounds to Console": WAS_Image_Bounds_to_Console,
-    "Text Dictionary Update": WAS_Dictionary_Update,
-    "Text Dictionary Get": WAS_Dictionary_Get,
-    "Text Dictionary Convert": WAS_Dictionary_Convert,
-    "Text Dictionary New": WAS_Dictionary_New,
-    "Text Dictionary Keys": WAS_Dictionary_Keys,
-    "Text Dictionary To Text": WAS_Dictionary_to_Text,
-    "Text Add Tokens": WAS_Text_Add_Tokens,
-    "Text Add Token by Input": WAS_Text_Add_Token_Input,
-    "Text Compare": WAS_Text_Compare,
-    "Text Concatenate": WAS_Text_Concatenate,
-    "Text File History Loader": WAS_Text_File_History,
-    "Text Find and Replace by Dictionary": WAS_Search_and_Replace_Dictionary,
-    "Text Find and Replace Input": WAS_Search_and_Replace_Input,
-    "Text Find and Replace": WAS_Search_and_Replace,
-    "Text Find": WAS_Find,
-    "Text Input Switch": WAS_Text_Input_Switch,
-    "Text List": WAS_Text_List,
-    "Text List Concatenate": WAS_Text_List_Concatenate,
-    "Text List to Text": WAS_Text_List_to_Text,
-    "Text Load Line From File": WAS_Text_Load_Line_From_File,
-    "Text Multiline": WAS_Text_Multiline,
-    "Text Multiline (Code Compatible)": WAS_Text_Multiline_Raw,
-    "Text Parse A1111 Embeddings": WAS_Text_Parse_Embeddings_By_Name,
-    "Text Parse Noodle Soup Prompts": WAS_Text_Parse_NSP,
-    "Text Parse Tokens": WAS_Text_Parse_Tokens,
-    "Text Random Line": WAS_Text_Random_Line,
-    "Text Random Prompt": WAS_Text_Random_Prompt,
-    "Text String": WAS_Text_String,
-    "Text Contains": WAS_Text_Contains,
-    "Text Shuffle": WAS_Text_Shuffle,
-    "Text Sort": WAS_Text_Sort,
-    "Text to Conditioning": WAS_Text_to_Conditioning,
-    "Text to Console": WAS_Text_to_Console,
-    "Text to Number": WAS_Text_To_Number,
-    "Text to String": WAS_Text_To_String,
-    "Text String Truncate": WAS_Text_String_Truncate,
-    "True Random.org Number Generator": WAS_True_Random_Number,
-    "unCLIP Checkpoint Loader": WAS_unCLIP_Checkpoint_Loader,
-    "Upscale Model Loader": WAS_Upscale_Model_Loader,
-    "Upscale Model Switch": WAS_Upscale_Model_Input_Switch,
-    "Write to GIF": WAS_Image_Morph_GIF_Writer,
-    "Write to Video": WAS_Video_Writer,
-    "VAE Input Switch": WAS_VAE_Input_Switch,
-    "Video Dump Frames": WAS_Video_Frame_Dump,
-    "CLIPSEG2": CLIPSeg2
+
+    "\u6279\u91cf\u8f7d\u5165\u0044\u0046\u004c\u4eba\u8138\u56fe\uff08\u4f7f\u7528\u6559\u7a0b\u89c1\u0064\u0066\u006c\u0064\u0061\u0074\u0061\u002e\u0063\u0063\u6559\u7a0b\u533a\uff09": DFL_Load_Image_Batch,
+    "\u5355\u5f20\u8bfb\u53d6\u0044\u0046\u004c\u4eba\u8138\u56fe\uff08\u4f7f\u7528\u6559\u7a0b\u89c1\u0064\u0066\u006c\u0064\u0061\u0074\u0061\u002e\u0063\u0063\u6559\u7a0b\u533a\uff09": DFL_Load_Image,
+    "\u4fdd\u5b58\u0044\u0046\u004c\u4eba\u8138\u56fe\uff08\u4f7f\u7528\u6559\u7a0b\u89c1\u0064\u0066\u006c\u0064\u0061\u0074\u0061\u002e\u0063\u0063\u6559\u7a0b\u533a\uff09": DFL_Image_Save,
 }
 
 #! EXTRA NODES
