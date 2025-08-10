@@ -46,16 +46,20 @@ import datetime
 import time
 import torch
 from tqdm import tqdm
-from .DFLIMG.DFLJPG import DFLJPG
+try:
+    from .DFLIMG.DFLJPG import DFLJPG
+except ImportError:
+    DFLJPG = None
+    cstr("DFLJPG module not found, DFL features will be disabled").warning.print()
 
 p310_plus = (sys.version_info >= (3, 10))
 
 MANIFEST = {
-    "name": "WAS Node Suite",
+    "name": "DFL Node Suite",
     "version": (2,2,2),
-    "author": "WASasquatch",
-    "project": "https://github.com/WASasquatch/was-node-suite-comfyui",
-    "description": "An extensive node suite for ComfyUI with over 180 new nodes",
+    "author": "WASasquatch + 滚石",
+    "project": "https://github.com/Arthurzhangsheng/comfyui_DFLimage",
+    "description": "An deepfacelab extensive node suite for ComfyUI ",
 }
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "was_node_suite_comfyui"))
@@ -191,7 +195,7 @@ if legacy_was_nodes_found:
 if f_disp:
     cstr("Legacy cleanup complete.").msg.print()
 
-#! DFL Suite CONFIG
+#! WAS SUITE CONFIG
 
 was_conf_template = {
                     "run_requirements": True,
@@ -263,7 +267,7 @@ else:
     if update_config:
         updateSuiteConfig(was_config)
 
-# DFL Suite Locations Debug
+# WAS Suite Locations Debug
 if was_config.__contains__('show_startup_junk'):
     if was_config['show_startup_junk']:
         cstr(f"Running At: {NODE_FILE}")
@@ -283,6 +287,9 @@ if was_config and was_config.__contains__('use_legacy_ascii_text'):
     if was_config['use_legacy_ascii_text']:
         TEXT_TYPE = "ASCII"
         cstr("use_legacy_ascii_text is `True` in `was_suite_config.json`. `ASCII` type is deprecated and the default will be `STRING` in the future.").warning.print()
+
+def is_force_input():
+    return True if TEXT_TYPE == 'STRING' else False
 
 # Convert WebUI Styles - TODO: Convert to PromptStyles class
 if was_config.__contains__('webui_styles'):
@@ -734,7 +741,7 @@ class PromptStyles:
 
 class WASDatabase:
     """
-    The DFL Suite Database Class provides a simple key-value database that stores
+    The WAS Suite Database Class provides a simple key-value database that stores
     data in a flatfile using the JSON format. Each key-value pair is associated with
     a category.
 
@@ -3496,6 +3503,7 @@ class WAS_Image_Paste_Crop:
             }
 
     RETURN_TYPES = ("IMAGE", "IMAGE")
+    RETURN_NAMES = ("IMAGE", "MASK")
     FUNCTION = "image_paste_crop"
 
     CATEGORY = "DFL Suite/Image/Process"
@@ -3604,6 +3612,7 @@ class WAS_Image_Paste_Crop_Location:
             }
 
     RETURN_TYPES = ("IMAGE", "IMAGE")
+    RETURN_NAMES = ("IMAGE", "MASK")
     FUNCTION = "image_paste_crop_location"
 
     CATEGORY = "DFL Suite/Image/Process"
@@ -5262,7 +5271,7 @@ class WAS_Image_Rescale:
 
 # LOAD IMAGE BATCH
 
-class DFL_Load_Image_Batch:
+class WAS_Load_Image_Batch:
     def __init__(self):
         self.HDB = WASDatabase(WAS_HISTORY_DATABASE)
 
@@ -5271,6 +5280,7 @@ class DFL_Load_Image_Batch:
         return {
             "required": {
                 "mode": (["single_image", "incremental_image", "random"],),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "index": ("INT", {"default": 0, "min": 0, "max": 150000, "step": 1}),
                 "label": ("STRING", {"default": 'Batch 001', "multiline": False}),
                 "path": ("STRING", {"default": '', "multiline": False}),
@@ -5283,38 +5293,36 @@ class DFL_Load_Image_Batch:
         }
 
     RETURN_TYPES = ("IMAGE",TEXT_TYPE, "DFLdata")
-    RETURN_NAMES = ("image","filename_text","DFL_meta_data")
+    RETURN_NAMES = ("image","filename_text", "DFL_meta_data")
     FUNCTION = "load_batch_images"
 
-    CATEGORY = "DFL Suite"
+    CATEGORY = "DFL Suite/IO"
 
-    def load_batch_images(self, path, pattern='*', index=0, mode="single_image", label='Batch 001', allow_RGBA_output='false', filename_text_extension='true'):
+    def load_batch_images(self, path, pattern='*', index=0, mode="single_image", seed=0, label='Batch 001', allow_RGBA_output='false', filename_text_extension='true'):
 
         allow_RGBA_output = (allow_RGBA_output == 'true')
 
         if not os.path.exists(path):
-            return (None, )
+            return (None, None, None)
         fl = self.BatchImageLoader(path, label, pattern)
         new_paths = fl.image_paths
         if mode == 'single_image':
-            image, filename, DFLdata = fl.get_image_by_id(index)
-            # print(DFLdata)
-            # print(str(DFLdata))
+            image, filename, DFL_dict = fl.get_image_by_id(index)
             if image == None:
                 cstr(f"No valid image was found for the inded `{index}`").error.print()
                 return (None, None, None)
         elif mode == 'incremental_image':
-            image, filename, DFLdata = fl.get_next_image()
+            image, filename, DFL_dict = fl.get_next_image()
             if image == None:
                 cstr(f"No valid image was found for the next ID. Did you remove images from the source directory?").error.print()
                 return (None, None, None)
         else:
+            random.seed(seed)
             newindex = int(random.random() * len(fl.image_paths))
-            image, filename, DFLdata = fl.get_image_by_id(newindex)
+            image, filename, DFL_dict = fl.get_image_by_id(newindex)
             if image == None:
                 cstr(f"No valid image was found for the next ID. Did you remove images from the source directory?").error.print()
                 return (None, None, None)
-
 
         # Update history
         update_history_images(new_paths)
@@ -5325,7 +5333,7 @@ class DFL_Load_Image_Batch:
         if filename_text_extension == "false":
             filename = os.path.splitext(filename)[0]
 
-        return (pil2tensor(image), filename, DFLdata)
+        return (pil2tensor(image), filename, DFL_dict)
 
     class BatchImageLoader:
         def __init__(self, directory_path, label, pattern):
@@ -5353,16 +5361,19 @@ class DFL_Load_Image_Batch:
         def get_image_by_id(self, image_id):
             if image_id < 0 or image_id >= len(self.image_paths):
                 cstr(f"Invalid image index `{image_id}`").error.print()
-                return
+                return None, None, None
             i = Image.open(self.image_paths[image_id])
             i = ImageOps.exif_transpose(i)
-            #------------dfl图片专门处理，读取已有的dfl信息------------
-            InputDflImg = DFLJPG.load(self.image_paths[image_id])
-            if not InputDflImg or not InputDflImg.has_data():
-                DFL_dict = None
-            else:
-                DFL_dict = InputDflImg.get_dict()
-            #-------------------------------------------------------
+            # DFL图片专门处理，读取已有的DFL信息
+            DFL_dict = None
+            if DFLJPG:
+                try:
+                    InputDflImg = DFLJPG.load(self.image_paths[image_id])
+                    if InputDflImg and InputDflImg.has_data():
+                        DFL_dict = InputDflImg.get_dict()
+                except:
+                    DFL_dict = None
+            # DFL处理结束
             return (i, os.path.basename(self.image_paths[image_id]), DFL_dict)
 
         def get_next_image(self):
@@ -5376,32 +5387,17 @@ class DFL_Load_Image_Batch:
             self.WDB.insert('Batch Counters', self.label, self.index)
             i = Image.open(image_path)
             i = ImageOps.exif_transpose(i)
-            #------------dfl图片专门处理，读取已有的dfl信息------------
-            InputDflImg = DFLJPG.load(image_path)
-            if not InputDflImg or not InputDflImg.has_data():
-                DFL_dict = None
-            else:
-                DFL_dict = InputDflImg.get_dict()
-            #-------------------------------------------------------
+            # DFL图片专门处理，读取已有的DFL信息
+            DFL_dict = None
+            if DFLJPG:
+                try:
+                    InputDflImg = DFLJPG.load(image_path)
+                    if InputDflImg and InputDflImg.has_data():
+                        DFL_dict = InputDflImg.get_dict()
+                except:
+                    DFL_dict = None
+            # DFL处理结束
             return (i, os.path.basename(image_path), DFL_dict)
-
-        def get_current_image(self):
-            if self.index >= len(self.image_paths):
-                self.index = 0
-            image_path = self.image_paths[self.index]
-            return os.path.basename(image_path)
-
-    @classmethod
-    def IS_CHANGED(cls, **kwargs):
-        if kwargs['mode'] != 'single_image':
-            return float("NaN")
-        else:
-            fl = DFL_Load_Image_Batch.BatchImageLoader(kwargs['path'], kwargs['label'], kwargs['pattern'])
-            filename = fl.get_current_image()
-            image = os.path.join(kwargs['path'], filename)
-            sha = get_sha256(image)
-            return sha
-
 
 # IMAGE HISTORY NODE
 
@@ -5511,6 +5507,7 @@ class WAS_Image_Padding:
         }
 
     RETURN_TYPES = ("IMAGE", "IMAGE")
+    RETURN_NAMES = ("IMAGE", "MASK")
     FUNCTION = "image_padding"
 
     CATEGORY = "DFL Suite/Image/Transform"
@@ -6239,7 +6236,10 @@ class WAS_Image_Levels:
             im_arr = np.clip(im_arr, 0, 255)
 
             # mid-level adjustment
-            gamma = math.log(0.5) / math.log((self.mid_level - self.min_level) / (self.max_level - self.min_level))
+            if self.mid_level <= self.min_level:  
+                gamma = 1.0
+            else:
+                gamma = math.log(0.5) / math.log((self.mid_level - self.min_level) / (self.max_level - self.min_level))
             im_arr = np.power(im_arr / 255, gamma) * 255
 
             im_arr = im_arr.astype(np.uint8)
@@ -7296,7 +7296,7 @@ class WAS_Export_API:
 # Image Save (NSP Compatible)
 # Originally From ComfyUI/nodes.py
 
-class DFL_Image_Save:
+class WAS_Image_Save:
     def __init__(self):
         self.output_dir = comfy_paths.output_directory
         self.type = 'output'
@@ -7305,13 +7305,12 @@ class DFL_Image_Save:
         return {
             "required": {
                 "images": ("IMAGE", ),
-                "DFL_meta_data": ("DFLdata",),
                 "output_path": ("STRING", {"default": '[time(%Y-%m-%d)]', "multiline": False}),
                 "filename_prefix": ("STRING", {"default": "ComfyUI"}),
                 "filename_delimiter": ("STRING", {"default":"_"}),
                 "filename_number_padding": ("INT", {"default":4, "min":1, "max":9, "step":1}),
                 "filename_number_start": (["false", "true"],),
-                "extension": (['jpg', 'png' , 'jpeg', 'gif', 'tiff', 'webp', 'bmp'], ),
+                "extension": (['png', 'jpg', 'jpeg', 'gif', 'tiff', 'webp', 'bmp'], ),
                 "dpi": ("INT", {"default": 300, "min": 1, "max": 2400, "step": 1}),
                 "quality": ("INT", {"default": 100, "min": 1, "max": 100, "step": 1}),
                 "optimize_image": (["true", "false"],),
@@ -7321,6 +7320,9 @@ class DFL_Image_Save:
                 "show_history_by_prefix": (["true", "false"],),
                 "embed_workflow": (["true", "false"],),
                 "show_previews": (["true", "false"],),
+            },
+            "optional": {
+                "DFL_meta_data": ("DFLdata",),
             },
             "hidden": {
                 "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"
@@ -7334,14 +7336,14 @@ class DFL_Image_Save:
 
     OUTPUT_NODE = True
 
-    CATEGORY = "DFL Suite"
+    CATEGORY = "DFL Suite/IO"
 
-    def was_save_images(self, images, DFL_meta_data=None, output_path='', filename_prefix="ComfyUI", filename_delimiter='_',
-                        extension='jpg', dpi=96, quality=100, optimize_image="true", lossless_webp="false", prompt=None, extra_pnginfo=None,
+    def was_save_images(self, images, output_path='', filename_prefix="ComfyUI", filename_delimiter='_',
+                        extension='png', dpi=96, quality=100, optimize_image="true", lossless_webp="false", prompt=None, extra_pnginfo=None,
                         overwrite_mode='false', filename_number_padding=4, filename_number_start='false',
                         show_history='false', show_history_by_prefix="true", embed_workflow="true",
-                        show_previews="true"):
-        
+                        show_previews="true", DFL_meta_data=None):
+
         delimiter = filename_delimiter
         number_padding = filename_number_padding
         lossless_webp = (lossless_webp == "true")
@@ -7362,7 +7364,7 @@ class DFL_Image_Save:
         if not os.path.isabs(output_path):
             output_path = os.path.join(self.output_dir, output_path)
         base_output = os.path.basename(output_path)
-        if output_path.endswith("ComfyUI/output") or output_path.endswith("ComfyUI\output"):
+        if output_path.endswith("ComfyUI/output") or output_path.endswith(r"ComfyUI\output"):
             base_output = ""
 
         # Check output destination
@@ -7391,17 +7393,11 @@ class DFL_Image_Save:
         else:
             counter = 1
 
-        # Set initial counter value
-        if existing_counters:
-            counter = existing_counters[0] + 1
-        else:
-            counter = 1
-
         # Set Extension
         file_extension = '.' + extension
         if file_extension not in ALLOWED_EXT:
             cstr(f"The extension `{extension}` is not valid. The valid formats are: {', '.join(sorted(ALLOWED_EXT))}").error.print()
-            file_extension = "png"
+            file_extension = ".png"
 
         results = list()
         output_files = list()
@@ -7450,19 +7446,21 @@ class DFL_Image_Save:
                 if extension in ["jpg", "jpeg"]:
                     img.save(output_file,
                              quality=quality, optimize=optimize_image, dpi=(dpi, dpi))
-                    #------------dfl图片专门处理，保存原有的dfl信息------------
-                    OutputDflImg = DFLJPG.load(output_file)
-                    OutputDflImg.set_dict(DFL_meta_data)
-                    OutputDflImg.save()
-                    #-------------------------------------------------------
+                    # DFL图片专门处理，保存原有的DFL信息
+                    if DFL_meta_data is not None and DFLJPG:
+                        try:
+                            OutputDflImg = DFLJPG.load(output_file)
+                            OutputDflImg.set_dict(DFL_meta_data)
+                            OutputDflImg.save()
+                        except Exception as e:
+                            cstr(f"Failed to save DFL metadata: {e}").warning.print()
+                    # DFL处理结束
                 elif extension == 'webp':
                     img.save(output_file,
                              quality=quality, lossless=lossless_webp, exif=exif_data)
-
                 elif extension == 'png':
                     img.save(output_file,
-                             pnginfo=exif_data, optimize=optimize_image)
-
+                             pnginfo=exif_data, optimize=optimize_image, dpi=(dpi, dpi))
                 elif extension == 'bmp':
                     img.save(output_file)
                 elif extension == 'tiff':
@@ -7471,81 +7469,6 @@ class DFL_Image_Save:
                 else:
                     img.save(output_file,
                              pnginfo=exif_data, optimize=optimize_image)
-
-                cstr(f"Image file saved to: {output_file}").msg.print()
-                output_files.append(output_file)
-
-                if show_history != 'true' and show_previews == 'true':
-                    subfolder = self.get_subfolder_path(output_file, original_output)
-                    results.append({
-                        "filename": file,
-                        "subfolder": subfolder,
-                        "type": self.type
-                    })
-
-                # Update the output image history
-                update_history_output_images(output_file)
-
-            except OSError as e:
-                cstr(f'Unable to save file to: {output_file}').error.print()
-                print(e)
-            except Exception as e:
-                cstr('Unable to save file due to the to the following error:').error.print()
-                print(e)
-
-            if overwrite_mode == 'false':
-                counter += 1
-
-        filtered_paths = []
-        if show_history == 'true' and show_previews == 'true':
-            HDB = WASDatabase(WAS_HISTORY_DATABASE)
-            conf = getSuiteConfig()
-            if HDB.catExists("History") and HDB.keyExists("History", "Output_Images"):
-                history_paths = HDB.get("History", "Output_Images")
-            else:
-                history_paths = None
-
-            if history_paths:
-
-                for image_path in history_paths:
-                    image_subdir = self.get_subfolder_path(image_path, self.output_dir)
-                    current_subdir = self.get_subfolder_path(output_file, self.output_dir)
-                    if not os.path.exists(image_path):
-                        continue
-                    if show_history_by_prefix == 'true' and image_subdir != current_subdir:
-                        continue
-                    if show_history_by_prefix == 'true' and not os.path.basename(image_path).startswith(filename_prefix):
-                        continue
-                    filtered_paths.append(image_path)
-
-                if conf.__contains__('history_display_limit'):
-                    filtered_paths = filtered_paths[-conf['history_display_limit']:]
-
-                filtered_paths.reverse()
-
-        if filtered_paths:
-            for image_path in filtered_paths:
-                subfolder = self.get_subfolder_path(image_path, self.output_dir)
-                image_data = {
-                    "filename": os.path.basename(image_path),
-                    "subfolder": subfolder,
-                    "type": self.type
-                }
-                results.append(image_data)
-
-        if show_previews == 'true':
-            return {"ui": {"images": results, "files": output_files}, "result": (images, output_files,)}
-        else:
-            return {"ui": {"images": []}, "result": (images, output_files,)}
-
-    def get_subfolder_path(self, image_path, output_path):
-        output_parts = output_path.strip(os.sep).split(os.sep)
-        image_parts = image_path.strip(os.sep).split(os.sep)
-        common_parts = os.path.commonprefix([output_parts, image_parts])
-        subfolder_parts = image_parts[len(common_parts):]
-        subfolder_path = os.sep.join(subfolder_parts[:-1])
-        return subfolder_path
-
 
 # Image Send HTTP
 # Sends images over http
@@ -7599,7 +7522,7 @@ class WAS_Image_Send_HTTP:
 
 
 # LOAD IMAGE NODE
-class DFL_Load_Image:
+class WAS_Load_Image:
 
     def __init__(self):
         self.input_dir = comfy_paths.input_directory
@@ -7621,11 +7544,12 @@ class DFL_Load_Image:
     RETURN_NAMES = ("image", "mask", "filename_text", "DFL_meta_data")
     FUNCTION = "load_image"
 
-    CATEGORY = "DFL Suite"
+    CATEGORY = "DFL Suite/IO"
 
     def load_image(self, image_path, RGBA='false', filename_text_extension="true"):
 
         RGBA = (RGBA == 'true')
+        DFL_dict = None
 
         if image_path.startswith('http'):
             from io import BytesIO
@@ -7635,13 +7559,15 @@ class DFL_Load_Image:
             try:
                 i = Image.open(image_path)
                 i = ImageOps.exif_transpose(i)
-                #-------------------------DFL图片处理------------
-                InputDflImg = DFLJPG.load(image_path)
-                if not InputDflImg or not InputDflImg.has_data():
-                    DFL_dict = None
-                else:
-                    DFL_dict = InputDflImg.get_dict()
-                #-------------------------DFL图片处理------------
+                # DFL图片处理，读取已有的DFL信息
+                if DFLJPG:
+                    try:
+                        InputDflImg = DFLJPG.load(image_path)
+                        if InputDflImg and InputDflImg.has_data():
+                            DFL_dict = InputDflImg.get_dict()
+                    except:
+                        DFL_dict = None
+                # DFL图片处理结束
             except OSError:
                 cstr(f"The image `{image_path.strip()}` specified doesn't exist!").error.print()
                 i = Image.new(mode='RGB', size=(512, 512), color=(0, 0, 0))
@@ -7979,6 +7905,7 @@ class WAS_Mask_Paste_Region:
         }
 
     RETURN_TYPES = ("MASK", "MASK")
+    RETURN_NAMES = ("RESULT_MASK", "CROP_MASK")
     FUNCTION = "mask_paste_region"
 
     CATEGORY = "DFL Suite/Image/Masking"
@@ -8152,6 +8079,140 @@ class WAS_Mask_Minority_Region:
             region_tensor = pil2mask(region_mask).unsqueeze(0).unsqueeze(1)
             return (region_tensor,)
 
+
+# MASK RECT AREA
+
+class WAS_Mask_Rect_Area:
+    # Creates a rectangle mask using percentage.
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "x": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1}),
+                "y": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1}),
+                "width": ("INT", {"default": 50, "min": 0, "max": 100, "step": 1}),
+                "height": ("INT", {"default": 50, "min": 0, "max": 100, "step": 1}),
+                "blur_radius": ("INT", {"default": 0, "min": 0, "max": 255, "step": 1}),
+            },
+            "hidden": {"extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"}
+        }
+
+    CATEGORY = "DFL Suite/Image/Masking"
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("MASKS",)
+
+    FUNCTION = "rect_mask"
+
+    def rect_mask(self, extra_pnginfo, unique_id, **kwargs):
+        # Get node values
+        min_x = kwargs["x"] / 100
+        min_y = kwargs["y"] / 100
+        width = kwargs["width"] / 100
+        height = kwargs["height"] / 100
+        blur_radius = kwargs["blur_radius"]
+
+        # Create a mask with standard resolution (e.g., 512x512)
+        resolution = 512
+        mask = torch.zeros((resolution, resolution))
+
+        # Calculate pixel coordinates
+        min_x_px = int(min_x * resolution)
+        min_y_px = int(min_y * resolution)
+        max_x_px = int((min_x + width) * resolution)
+        max_y_px = int((min_y + height) * resolution)
+
+        # Draw the rectangle on the mask
+        mask[min_y_px:max_y_px, min_x_px:max_x_px] = 1
+
+        # Apply blur if the radii are greater than 0
+        if blur_radius > 0:
+            dx = blur_radius * 2 + 1
+            dy = blur_radius * 2 + 1
+
+            # Convert the mask to a format compatible with OpenCV (numpy array)
+            mask_np = mask.cpu().numpy().astype("float32")
+
+            # Apply Gaussian Blur
+            blurred_mask = cv2.GaussianBlur(mask_np, (dx, dy), 0)
+
+            # Convert back to tensor
+            mask = torch.from_numpy(blurred_mask)
+
+        # Return the mask as a tensor with an additional channel
+        return (mask.unsqueeze(0),)
+
+
+# MASK RECT AREA ADVANCED
+
+class WAS_Mask_Rect_Area_Advanced:
+    # Creates a rectangle mask using pixels relative to image size.
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "x": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 64}),
+                "y": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 64}),
+                "width": ("INT", {"default": 256, "min": 0, "max": 4096, "step": 64}),
+                "height": ("INT", {"default": 256, "min": 0, "max": 4096, "step": 64}),
+                "image_width": ("INT", {"default": 512, "min": 64, "max": 4096, "step": 64}),
+                "image_height": ("INT", {"default": 512, "min": 64, "max": 4096, "step": 64}),
+                "blur_radius": ("INT", {"default": 0, "min": 0, "max": 255, "step": 1}),
+            },
+            "hidden": {"extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"}
+        }
+
+    CATEGORY = "DFL Suite/Image/Masking"
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("MASKS",)
+
+    FUNCTION = "rect_mask_adv"
+
+    def rect_mask_adv(self, extra_pnginfo, unique_id, **kwargs):
+         # Get node values
+        min_x = kwargs["x"]
+        min_y = kwargs["y"]
+        width = kwargs["width"]
+        height = kwargs["height"]
+        image_width = kwargs["image_width"]
+        image_height = kwargs["image_height"]
+        blur_radius = kwargs["blur_radius"]
+
+        # Calculate maximum coordinates
+        max_x = min_x + width
+        max_y = min_y + height
+
+        # Create a mask with the image dimensions
+        mask = torch.zeros((image_height, image_width))
+
+        # Draw the rectangle on the mask
+        mask[int(min_y):int(max_y), int(min_x):int(max_x)] = 1
+
+        # Apply blur if the radii are greater than 0
+        if blur_radius > 0:
+            dx = blur_radius * 2 + 1
+            dy = blur_radius * 2 + 1
+
+            # Convert the mask to a format compatible with OpenCV (numpy array)
+            mask_np = mask.cpu().numpy().astype("float32")
+
+            # Apply Gaussian Blur
+            blurred_mask = cv2.GaussianBlur(mask_np, (dx, dy), 0)
+
+            # Convert back to tensor
+            mask = torch.from_numpy(blurred_mask)
+
+        # Return the mask as a tensor with an additional channel
+        return (mask.unsqueeze(0),)
 
 
 # MASK ARBITRARY REGION
@@ -8641,18 +8702,29 @@ class WAS_Mask_Combine:
     FUNCTION = "combine_masks"
 
     def combine_masks(self, mask_a, mask_b, mask_c=None, mask_d=None, mask_e=None, mask_f=None):
-        masks = [mask_a, mask_b]
-        if mask_c:
-            masks.append(mask_c)
-        if mask_d:
-            masks.append(mask_d)
-        if mask_e:
-            masks.append(mask_e)
-        if mask_f:
-            masks.append(mask_f)
-        combined_mask = torch.sum(torch.stack(masks, dim=0), dim=0)
-        combined_mask = torch.clamp(combined_mask, 0, 1)  # Ensure values are between 0 and 1
-        return (combined_mask, )
+        # Gather all masks in a list
+        masks = [m for m in [mask_a, mask_b, mask_c, mask_d, mask_e, mask_f] if m is not None]
+
+        # Skip any masks that are the known "empty" shape [1, 64, 64] from "Preview" etc
+        # (You can also use a sum-of-pixels check, or other logic.)
+        valid_masks = [m for m in masks if m.shape != (1, 64, 64)]
+        # cstr(f"mask shapes: ... `{valid_masks}`").msg.print()
+
+        # If no valid masks, decide on a fallback
+        if len(valid_masks) == 0:
+            # Could return a zeroed-out mask, or just return mask_a, or raise a warning
+            # Return mask_a so we don't break the graph
+            return (mask_a, )
+
+        # If there is exactly one valid mask, no combine needed
+        if len(valid_masks) == 1:
+            return (valid_masks[0], )
+
+        # Otherwise stack, sum, clamp
+        combined_mask = torch.sum(torch.stack(valid_masks, dim=0), dim=0)
+        combined_mask = torch.clamp(combined_mask, 0, 1)  # Keep values in 0..1
+
+        return (combined_mask,)
 
 class WAS_Mask_Combine_Batch:
 
@@ -8945,6 +9017,7 @@ class MiDaS_Background_Foreground_Removal:
         }
 
     RETURN_TYPES = ("IMAGE", "IMAGE")
+    RETURN_NAMES = ("RESULT", "DEPTH")
     FUNCTION = "midas_remove"
 
     CATEGORY = "DFL Suite/Image/AI"
@@ -9899,7 +9972,7 @@ class WAS_Text_Parse_Embeddings_By_Name:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "text": (TEXT_TYPE, {"forceInput": is_force_input()}),
             }
         }
     RETURN_TYPES = (TEXT_TYPE,)
@@ -9961,7 +10034,7 @@ class WAS_Dictionary_Convert:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "dictionary_text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)})
+                "dictionary_text": (TEXT_TYPE, {"forceInput": is_force_input()})
             },
         }
     RETURN_TYPES = ("DICT",)
@@ -10108,6 +10181,7 @@ class WAS_Text_String:
             }
         }
     RETURN_TYPES = (TEXT_TYPE,TEXT_TYPE,TEXT_TYPE,TEXT_TYPE)
+    RETURN_NAMES = ("TEXT", "TEXT_B", "TEXT_C", "TEXT_D")
     FUNCTION = "text_string"
 
     CATEGORY = "DFL Suite/Text"
@@ -10146,6 +10220,7 @@ class WAS_Text_String_Truncate:
             }
         }
     RETURN_TYPES = (TEXT_TYPE,TEXT_TYPE,TEXT_TYPE,TEXT_TYPE)
+    RETURN_NAMES = ("TEXT", "TEXT_B", "TEXT_C", "TEXT_D")
     FUNCTION = "truncate_string"
 
     CATEGORY = "DFL Suite/Text/Operations"
@@ -10188,8 +10263,8 @@ class WAS_Text_Compare:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "text_a": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
-                "text_b": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "text_a": (TEXT_TYPE, {"forceInput": is_force_input()}),
+                "text_b": (TEXT_TYPE, {"forceInput": is_force_input()}),
                 "mode": (["similarity","difference"],),
                 "tolerance": ("FLOAT", {"default":0.0,"min":0.0,"max":1.0,"step":0.01}),
             }
@@ -10312,7 +10387,7 @@ class WAS_Text_Random_Line:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "text": (TEXT_TYPE, {"forceInput": is_force_input()}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             }
         }
@@ -10398,7 +10473,7 @@ class WAS_Find:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "text": (TEXT_TYPE, {"forceInput": is_force_input()}),
                 "substring": ("STRING", {"default": '', "multiline": False}),
                 "pattern": ("STRING", {"default": '', "multiline": False}),
             }
@@ -10412,9 +10487,9 @@ class WAS_Find:
 
     def execute(self, text, substring, pattern):
         if substring:
-            return substring in text
+            return (substring in text, )
 
-        return bool(re.search(pattern, text))
+        return (bool(re.search(pattern, text)), )
 
 
 
@@ -10428,7 +10503,7 @@ class WAS_Search_and_Replace:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "text": (TEXT_TYPE, {"forceInput": is_force_input()}),
                 "find": ("STRING", {"default": '', "multiline": False}),
                 "replace": ("STRING", {"default": '', "multiline": False}),
             }
@@ -10459,7 +10534,7 @@ class WAS_Text_Shuffle:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "text": (TEXT_TYPE, {"forceInput": is_force_input()}),
                 "separator": ("STRING", {"default": ',', "multiline": False}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             }
@@ -10492,7 +10567,7 @@ class WAS_Text_Sort:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "text": (TEXT_TYPE, {"forceInput": is_force_input()}),
                 "separator": ("STRING", {"default": ', ', "multiline": False}),
             }
         }
@@ -10538,9 +10613,9 @@ class WAS_Search_and_Replace_Input:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
-                "find": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
-                "replace": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "text": (TEXT_TYPE, {"forceInput": is_force_input()}),
+                "find": (TEXT_TYPE, {"forceInput": is_force_input()}),
+                "replace": (TEXT_TYPE, {"forceInput": is_force_input()}),
             }
         }
 
@@ -10573,10 +10648,10 @@ class WAS_Search_and_Replace_Dictionary:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "text": (TEXT_TYPE, {"forceInput": is_force_input()}),
                 "dictionary": ("DICT",),
                 "replacement_key": ("STRING", {"default": "__", "multiline": False}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "seed": ("INT", {"default": 1, "min": 0, "max": 0xffffffffffffffff}),
             }
         }
 
@@ -10586,21 +10661,18 @@ class WAS_Search_and_Replace_Dictionary:
     CATEGORY = "DFL Suite/Text/Search"
 
     def text_search_and_replace_dict(self, text, dictionary, replacement_key, seed):
-
         random.seed(seed)
-
-        # Parse Text
         new_text = text
 
         for term in dictionary.keys():
             tkey = f'{replacement_key}{term}{replacement_key}'
             tcount = new_text.count(tkey)
             for _ in range(tcount):
-                new_text = new_text.replace(tkey, random.choice(dictionary[term]), 1)
-                if seed > 0 or seed < 0:
-                    seed = seed + 1
+                new_text = new_text.replace(tkey, dictionary[term], 1)
+                if seed != 0:
+                    seed += 1
                     random.seed(seed)
-
+                    
         return (new_text, )
 
     @classmethod
@@ -10621,7 +10693,7 @@ class WAS_Text_Parse_NSP:
                 "mode": (["Noodle Soup Prompts", "Wildcards"],),
                 "noodle_key": ("STRING", {"default": '__', "multiline": False}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
-                "text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "text": (TEXT_TYPE, {"forceInput": is_force_input()}),
             }
         }
 
@@ -10811,7 +10883,7 @@ class WAS_Text_to_Conditioning:
         return {
             "required": {
                 "clip": ("CLIP",),
-                "text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "text": (TEXT_TYPE, {"forceInput": is_force_input()}),
             }
         }
 
@@ -10837,7 +10909,7 @@ class WAS_Text_Parse_Tokens:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "text": (TEXT_TYPE, {"forceInput": is_force_input()}),
             }
         }
 
@@ -10913,8 +10985,8 @@ class WAS_Text_Add_Token_Input:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "token_name": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
-                "token_value": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "token_name": (TEXT_TYPE, {"forceInput": is_force_input()}),
+                "token_value": (TEXT_TYPE, {"forceInput": is_force_input()}),
                 "print_current_tokens": (["false", "true"],),
             }
         }
@@ -10959,7 +11031,7 @@ class WAS_Text_to_Console:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "text": (TEXT_TYPE, {"forceInput": is_force_input()}),
                 "label": ("STRING", {"default": f'Text Output', "multiline": False}),
             }
         }
@@ -11195,7 +11267,7 @@ class WAS_Text_To_String:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "text": (TEXT_TYPE, {"forceInput": is_force_input()}),
             }
         }
 
@@ -11215,7 +11287,7 @@ class WAS_Text_To_Number:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "text": (TEXT_TYPE, {"forceInput": is_force_input()}),
             }
         }
 
@@ -11357,6 +11429,7 @@ class WAS_BLIP_Analyze_Image:
         }
 
     RETURN_TYPES = (TEXT_TYPE, TEXT_TYPE)
+    RETURN_NAMES = ("FULL_CAPTIONS", "CAPTIONS")
     OUTPUT_IS_LIST = (False, True)
 
     FUNCTION = "blip_caption_image"
@@ -12248,6 +12321,10 @@ class WAS_Bounded_Image_Crop_With_Mask:
                 "padding_right": ("INT", {"default": 64, "min": 0, "max": 0xffffffffffffffff}),
                 "padding_top": ("INT", {"default": 64, "min": 0, "max": 0xffffffffffffffff}),
                 "padding_bottom": ("INT", {"default": 64, "min": 0, "max": 0xffffffffffffffff}),
+                
+            },
+            "optional":{
+                "return_list": ("BOOLEAN", {"default": False}),
             }
         }
 
@@ -12256,7 +12333,7 @@ class WAS_Bounded_Image_Crop_With_Mask:
 
     CATEGORY = "DFL Suite/Image/Bound"
 
-    def bounded_image_crop_with_mask(self, image, mask, padding_left, padding_right, padding_top, padding_bottom):
+    def bounded_image_crop_with_mask(self, image, mask, padding_left, padding_right, padding_top, padding_bottom,return_list=False):
         # Ensure we are working with batches
         image = image.unsqueeze(0) if image.dim() == 3 else image
         mask = mask.unsqueeze(0) if mask.dim() == 2 else mask
@@ -12283,8 +12360,9 @@ class WAS_Bounded_Image_Crop_With_Mask:
             # Even if only a single mask, create a bounds for each cropped image
             all_bounds.append([rmin, rmax, cmin, cmax])
             cropped_images.append(image[i][rmin:rmax+1, cmin:cmax+1, :])
-
-            return torch.stack(cropped_images), all_bounds
+        if return_list:
+            return cropped_images, all_bounds
+        return torch.stack(cropped_images), all_bounds
 
 # DEBUG IMAGE BOUNDS TO CONSOLE
 
@@ -12395,7 +12473,7 @@ class WAS_True_Random_Number:
 
     CATEGORY = "DFL Suite/Number"
 
-    def return_true_randm_number(self, api_key=None, minimum=0, maximum=10):
+    def return_true_randm_number(self, api_key=None, minimum=0, maximum=10, mode="random"):
 
         # Get Random Number
         number = self.get_random_numbers(api_key=api_key, minimum=minimum, maximum=maximum)[0]
@@ -12456,7 +12534,7 @@ class WAS_Constant_Number:
                 "number": ("FLOAT", {"default": 0, "min": -18446744073709551615, "max": 18446744073709551615, "step": 0.01}),
             },
             "optional": {
-                "number_as_text": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "number_as_text": (TEXT_TYPE, {"forceInput": is_force_input()}),
             }
         }
 
@@ -12498,7 +12576,7 @@ class WAS_Number_Counter:
         return {
             "required": {
                 "number_type": (["integer", "float"],),
-                "mode": (["increment", "decrement", "increment_to_stop", "decrement_to_stop"],),
+                "mode": (["increment", "decrement", "increment_to_stop", "decrement_to_stop", "reset_after_stop"],),
                 "start": ("FLOAT", {"default": 0, "min": -18446744073709551615, "max": 18446744073709551615, "step": 0.01}),
                 "stop": ("FLOAT", {"default": 0, "min": -18446744073709551615, "max": 18446744073709551615, "step": 0.01}),
                 "step": ("FLOAT", {"default": 1, "min": 0, "max": 99999, "step": 0.01}),
@@ -12538,6 +12616,8 @@ class WAS_Number_Counter:
             counter = counter + step if counter < stop else counter
         elif mode == 'decrement_to_stop':
             counter = counter - step if counter > stop else counter
+        elif mode == 'reset_after_stop':
+            counter = counter + step if counter < stop else start + step
 
         self.counters[unique_id] = counter
 
@@ -13064,7 +13144,7 @@ class WAS_Latent_Size_To_Number:
         }
 
     RETURN_TYPES = ("NUMBER", "NUMBER", "FLOAT", "FLOAT", "INT", "INT")
-    RETURN_NAMES = ("tensor_w_num","tensor_h_num")
+    RETURN_NAMES = ("tensor_w_num","tensor_h_num","tensor_w_float","tensor_h_float","tensor_w_int","tensor_h_int")
     FUNCTION = "latent_width_height"
 
     CATEGORY = "DFL Suite/Number/Operations"
@@ -13521,8 +13601,8 @@ class WAS_Text_Input_Switch:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "text_a": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
-                "text_b": (TEXT_TYPE, {"forceInput": (True if TEXT_TYPE == 'STRING' else False)}),
+                "text_a": (TEXT_TYPE, {"forceInput": is_force_input()}),
+                "text_b": (TEXT_TYPE, {"forceInput": is_force_input()}),
                 "boolean": ("BOOLEAN", {"forceInput": True}),
             }
         }
@@ -14251,9 +14331,226 @@ class WAS_Integer_Place_Counter:
 
 # NODE MAPPING
 NODE_CLASS_MAPPINGS = {
-    "\u6279\u91cf\u8f7d\u5165\u0044\u0046\u004c\u4eba\u8138\u56fe\uff08\u4f7f\u7528\u6559\u7a0b\u89c1\u0064\u0066\u006c\u0064\u0061\u0074\u0061\u002e\u0063\u0063\u6559\u7a0b\u533a\uff09": DFL_Load_Image_Batch,
-    "\u4fdd\u5b58\u0044\u0046\u004c\u4eba\u8138\u56fe\uff08\u4f7f\u7528\u6559\u7a0b\u89c1\u0064\u0066\u006c\u0064\u0061\u0074\u0061\u002e\u0063\u0063\u6559\u7a0b\u533a\uff09":DFL_Image_Save,
-    "\u5355\u5f20\u8bfb\u53d6\u0044\u0046\u004c\u4eba\u8138\u56fe\uff08\u4f7f\u7528\u6559\u7a0b\u89c1\u0064\u0066\u006c\u0064\u0061\u0074\u0061\u002e\u0063\u0063\u6559\u7a0b\u533a\uff09": DFL_Load_Image,
+    "BLIP Model Loader": WAS_BLIP_Model_Loader,
+    "Blend Latents": WAS_Blend_Latents,
+    "Bus Node": WAS_Bus,
+    "Cache Node": WAS_Cache,
+    "Checkpoint Loader": WAS_Checkpoint_Loader,
+    "Checkpoint Loader (Simple)": WAS_Checkpoint_Loader_Simple,
+    "CLIPTextEncode (NSP)": WAS_NSP_CLIPTextEncoder,
+    "CLIP Input Switch": WAS_CLIP_Input_Switch,
+    "CLIP Vision Input Switch": WAS_CLIP_Vision_Input_Switch,
+    "Conditioning Input Switch": WAS_Conditioning_Input_Switch,
+    "Constant Number": WAS_Constant_Number,
+    "Create Grid Image": WAS_Image_Grid_Image,
+    "Create Grid Image from Batch": WAS_Image_Grid_Image_Batch,
+    "Create Morph Image": WAS_Image_Morph_GIF,
+    "Create Morph Image from Path": WAS_Image_Morph_GIF_By_Path,
+    "Create Video from Path": WAS_Create_Video_From_Path,
+    "CLIPSeg Masking": WAS_CLIPSeg,
+    "CLIPSeg Model Loader": WAS_CLIPSeg_Model_Loader,
+    "CLIPSeg Batch Masking": WAS_CLIPSeg_Batch,
+    "Convert Masks to Images": WAS_Mask_To_Image,
+    "Control Net Model Input Switch": WAS_Control_Net_Input_Switch,
+    "Debug Number to Console": WAS_Debug_Number_to_Console,
+    "Dictionary to Console": WAS_Dictionary_To_Console,
+    "Diffusers Model Loader": WAS_Diffusers_Loader,
+    "Diffusers Hub Model Down-Loader": WAS_Diffusers_Hub_Model_Loader,
+    "Export API": WAS_Export_API,
+    "Latent Input Switch": WAS_Latent_Input_Switch,
+    "Load Cache": WAS_Load_Cache,
+    "Logic Boolean": WAS_Boolean,
+    "Logic Boolean Primitive": WAS_Boolean_Primitive,
+    "Logic Comparison OR": WAS_Logical_OR,
+    "Logic Comparison AND": WAS_Logical_AND,
+    "Logic Comparison XOR": WAS_Logical_XOR,
+    "Logic NOT": WAS_Logical_NOT,
+    "Lora Loader": WAS_Lora_Loader,
+    "Hex to HSL": WAS_Hex_to_HSL,
+    "HSL to Hex": WAS_HSL_to_Hex,
+    "Image SSAO (Ambient Occlusion)": WAS_Image_Ambient_Occlusion,
+    "Image SSDO (Direct Occlusion)": WAS_Image_Direct_Occlusion,
+    "Image Analyze": WAS_Image_Analyze,
+    "Image Aspect Ratio": WAS_Image_Aspect_Ratio,
+    "Image Batch": WAS_Image_Batch,
+    "Image Blank": WAS_Image_Blank,
+    "Image Blend by Mask": WAS_Image_Blend_Mask,
+    "Image Blend": WAS_Image_Blend,
+    "Image Blending Mode": WAS_Image_Blending_Mode,
+    "Image Bloom Filter": WAS_Image_Bloom_Filter,
+    "Image Canny Filter": WAS_Canny_Filter,
+    "Image Chromatic Aberration": WAS_Image_Chromatic_Aberration,
+    "Image Color Palette": WAS_Image_Color_Palette,
+    "Image Crop Face": WAS_Image_Crop_Face,
+    "Image Crop Location": WAS_Image_Crop_Location,
+    "Image Crop Square Location": WAS_Image_Crop_Square_Location,
+    "Image Displacement Warp": WAS_Image_Displacement_Warp,
+    "Image Lucy Sharpen": WAS_Lucy_Sharpen,
+    "Image Paste Face": WAS_Image_Paste_Face_Crop,
+    "Image Paste Crop": WAS_Image_Paste_Crop,
+    "Image Paste Crop by Location": WAS_Image_Paste_Crop_Location,
+    "Image Pixelate": WAS_Image_Pixelate,
+    "Image Power Noise": WAS_Image_Power_Noise,
+    "Image Dragan Photography Filter": WAS_Dragon_Filter,
+    "Image Edge Detection Filter": WAS_Image_Edge,
+    "Image Film Grain": WAS_Film_Grain,
+    "Image Filter Adjustments": WAS_Image_Filters,
+    "Image Flip": WAS_Image_Flip,
+    "Image Gradient Map": WAS_Image_Gradient_Map,
+    "Image Generate Gradient": WAS_Image_Generate_Gradient,
+    "Image High Pass Filter": WAS_Image_High_Pass_Filter,
+    "Image History Loader": WAS_Image_History,
+    "Image Input Switch": WAS_Image_Input_Switch,
+    "Image Levels Adjustment": WAS_Image_Levels,
+    "Image Load": WAS_Load_Image,
+    "Image Median Filter": WAS_Image_Median_Filter,
+    "Image Mix RGB Channels": WAS_Image_RGB_Merge,
+    "Image Monitor Effects Filter": WAS_Image_Monitor_Distortion_Filter,
+    "Image Nova Filter": WAS_Image_Nova_Filter,
+    "Image Padding": WAS_Image_Padding,
+    "Image Perlin Noise": WAS_Image_Perlin_Noise,
+    "Image Rembg (Remove Background)": WAS_Remove_Rembg,
+    "Image Perlin Power Fractal": WAS_Image_Perlin_Power_Fractal,
+    "Image Remove Background (Alpha)": WAS_Remove_Background,
+    "Image Remove Color": WAS_Image_Remove_Color,
+    "Image Resize": WAS_Image_Rescale,
+    "Image Rotate": WAS_Image_Rotate,
+    "Image Rotate Hue": WAS_Image_Rotate_Hue,
+    "Image Send HTTP": WAS_Image_Send_HTTP,
+    "Image Save": WAS_Image_Save,
+    "Image Seamless Texture": WAS_Image_Make_Seamless,
+    "Image Select Channel": WAS_Image_Select_Channel,
+    "Image Select Color": WAS_Image_Select_Color,
+    "Image Shadows and Highlights": WAS_Shadow_And_Highlight_Adjustment,
+    "Image Size to Number": WAS_Image_Size_To_Number,
+    "Image Stitch": WAS_Image_Stitch,
+    "Image Style Filter": WAS_Image_Style_Filter,
+    "Image Threshold": WAS_Image_Threshold,
+    "Image Tiled": WAS_Image_Tile_Batch,
+    "Image Transpose": WAS_Image_Transpose,
+    "Image fDOF Filter": WAS_Image_fDOF,
+    "Image to Latent Mask": WAS_Image_To_Mask,
+    "Image to Noise": WAS_Image_To_Noise,
+    "Image to Seed": WAS_Image_To_Seed,
+    "Images to RGB": WAS_Images_To_RGB,
+    "Images to Linear": WAS_Images_To_Linear,
+    "Integer place counter": WAS_Integer_Place_Counter,
+    "Image Voronoi Noise Filter": WAS_Image_Voronoi_Noise_Filter,
+    "KSampler (WAS)": WAS_KSampler,
+    "KSampler Cycle": WAS_KSampler_Cycle,
+    "Latent Batch": WAS_Latent_Batch,
+    "Latent Noise Injection": WAS_Latent_Noise,
+    "Latent Size to Number": WAS_Latent_Size_To_Number,
+    "Latent Upscale by Factor (WAS)": WAS_Latent_Upscale,
+    "Load Image Batch": WAS_Load_Image_Batch,
+    "Load Text File": WAS_Text_Load_From_File,
+    "Load Lora": WAS_Lora_Loader,
+    "Lora Input Switch": WAS_Lora_Input_Switch,
+    "Masks Add": WAS_Mask_Add,
+    "Masks Subtract": WAS_Mask_Subtract,
+    "Mask Arbitrary Region": WAS_Mask_Arbitrary_Region,
+    "Mask Batch to Mask": WAS_Mask_Batch_to_Single_Mask,
+    "Mask Batch": WAS_Mask_Batch,
+    "Mask Ceiling Region": WAS_Mask_Ceiling_Region,
+    "Mask Crop Dominant Region": WAS_Mask_Crop_Dominant_Region,
+    "Mask Crop Minority Region": WAS_Mask_Crop_Minority_Region,
+    "Mask Crop Region": WAS_Mask_Crop_Region,
+    "Mask Paste Region": WAS_Mask_Paste_Region,
+    "Mask Dilate Region": WAS_Mask_Dilate_Region,
+    "Mask Dominant Region": WAS_Mask_Dominant_Region,
+    "Mask Erode Region": WAS_Mask_Erode_Region,
+    "Mask Fill Holes": WAS_Mask_Fill_Region,
+    "Mask Floor Region": WAS_Mask_Floor_Region,
+    "Mask Gaussian Region": WAS_Mask_Gaussian_Region,
+    "Mask Invert": WAS_Mask_Invert,
+    "Mask Minority Region": WAS_Mask_Minority_Region,
+    "Mask Rect Area": WAS_Mask_Rect_Area,
+    "Mask Rect Area (Advanced)": WAS_Mask_Rect_Area_Advanced,
+    "Mask Smooth Region": WAS_Mask_Smooth_Region,
+    "Mask Threshold Region": WAS_Mask_Threshold_Region,
+    "Masks Combine Regions": WAS_Mask_Combine,
+    "Masks Combine Batch": WAS_Mask_Combine_Batch,
+    "MiDaS Model Loader": MiDaS_Model_Loader,
+    "MiDaS Depth Approximation": MiDaS_Depth_Approx,
+    "MiDaS Mask Image": MiDaS_Background_Foreground_Removal,
+    "Model Input Switch": WAS_Model_Input_Switch,
+    "Number Counter": WAS_Number_Counter,
+    "Number Operation": WAS_Number_Operation,
+    "Number to Float": WAS_Number_To_Float,
+    "Number Input Switch": WAS_Number_Input_Switch,
+    "Number Input Condition": WAS_Number_Input_Condition,
+    "Number Multiple Of": WAS_Number_Multiple_Of,
+    "Number PI": WAS_Number_PI,
+    "Number to Int": WAS_Number_To_Int,
+    "Number to Seed": WAS_Number_To_Seed,
+    "Number to String": WAS_Number_To_String,
+    "Number to Text": WAS_Number_To_Text,
+    "Boolean To Text": WAS_Boolean_To_Text,
+    "Prompt Styles Selector": WAS_Prompt_Styles_Selector,
+    "Prompt Multiple Styles Selector": WAS_Prompt_Multiple_Styles_Selector,
+    "Random Number": WAS_Random_Number,
+    "Save Text File": WAS_Text_Save,
+    "Seed": WAS_Seed,
+    "Tensor Batch to Image": WAS_Tensor_Batch_to_Image,
+    "BLIP Analyze Image": WAS_BLIP_Analyze_Image,
+    "SAM Model Loader": WAS_SAM_Model_Loader,
+    "SAM Parameters": WAS_SAM_Parameters,
+    "SAM Parameters Combine": WAS_SAM_Combine_Parameters,
+    "SAM Image Mask": WAS_SAM_Image_Mask,
+    "Samples Passthrough (Stat System)": WAS_Samples_Passthrough_Stat_System,
+    "String to Text": WAS_String_To_Text,
+    "Image Bounds": WAS_Image_Bounds,
+    "Inset Image Bounds": WAS_Inset_Image_Bounds,
+    "Bounded Image Blend": WAS_Bounded_Image_Blend,
+    "Bounded Image Blend with Mask": WAS_Bounded_Image_Blend_With_Mask,
+    "Bounded Image Crop": WAS_Bounded_Image_Crop,
+    "Bounded Image Crop with Mask": WAS_Bounded_Image_Crop_With_Mask,
+    "Image Bounds to Console": WAS_Image_Bounds_to_Console,
+    "Text Dictionary Update": WAS_Dictionary_Update,
+    "Text Dictionary Get": WAS_Dictionary_Get,
+    "Text Dictionary Convert": WAS_Dictionary_Convert,
+    "Text Dictionary New": WAS_Dictionary_New,
+    "Text Dictionary Keys": WAS_Dictionary_Keys,
+    "Text Dictionary To Text": WAS_Dictionary_to_Text,
+    "Text Add Tokens": WAS_Text_Add_Tokens,
+    "Text Add Token by Input": WAS_Text_Add_Token_Input,
+    "Text Compare": WAS_Text_Compare,
+    "Text Concatenate": WAS_Text_Concatenate,
+    "Text File History Loader": WAS_Text_File_History,
+    "Text Find and Replace by Dictionary": WAS_Search_and_Replace_Dictionary,
+    "Text Find and Replace Input": WAS_Search_and_Replace_Input,
+    "Text Find and Replace": WAS_Search_and_Replace,
+    "Text Find": WAS_Find,
+    "Text Input Switch": WAS_Text_Input_Switch,
+    "Text List": WAS_Text_List,
+    "Text List Concatenate": WAS_Text_List_Concatenate,
+    "Text List to Text": WAS_Text_List_to_Text,
+    "Text Load Line From File": WAS_Text_Load_Line_From_File,
+    "Text Multiline": WAS_Text_Multiline,
+    "Text Multiline (Code Compatible)": WAS_Text_Multiline_Raw,
+    "Text Parse A1111 Embeddings": WAS_Text_Parse_Embeddings_By_Name,
+    "Text Parse Noodle Soup Prompts": WAS_Text_Parse_NSP,
+    "Text Parse Tokens": WAS_Text_Parse_Tokens,
+    "Text Random Line": WAS_Text_Random_Line,
+    "Text Random Prompt": WAS_Text_Random_Prompt,
+    "Text String": WAS_Text_String,
+    "Text Contains": WAS_Text_Contains,
+    "Text Shuffle": WAS_Text_Shuffle,
+    "Text Sort": WAS_Text_Sort,
+    "Text to Conditioning": WAS_Text_to_Conditioning,
+    "Text to Console": WAS_Text_to_Console,
+    "Text to Number": WAS_Text_To_Number,
+    "Text to String": WAS_Text_To_String,
+    "Text String Truncate": WAS_Text_String_Truncate,
+    "True Random.org Number Generator": WAS_True_Random_Number,
+    "unCLIP Checkpoint Loader": WAS_unCLIP_Checkpoint_Loader,
+    "Upscale Model Loader": WAS_Upscale_Model_Loader,
+    "Upscale Model Switch": WAS_Upscale_Model_Input_Switch,
+    "Write to GIF": WAS_Image_Morph_GIF_Writer,
+    "Write to Video": WAS_Video_Writer,
+    "VAE Input Switch": WAS_VAE_Input_Switch,
+    "Video Dump Frames": WAS_Video_Frame_Dump,
+    "CLIPSEG2": CLIPSeg2
 }
 
 #! EXTRA NODES
@@ -14322,7 +14619,9 @@ if os.path.exists(BKAdvCLIP_dir):
         cstr('`CLIPTextEncode (BlenderNeko Advanced + NSP)` node enabled under `DFL Suite/Conditioning` menu.').msg.print()
 
 # opencv-python-headless handling
-if 'opencv-python' in packages() or 'opencv-python-headless' in packages():
+installed_packages = packages()
+opencv_candidates = ['opencv-python', 'opencv-python-headless', 'opencv-contrib-python', 'opencv-contrib-python-headless']
+if any(package in installed_packages for package in opencv_candidates):
     try:
         import cv2
         build_info = ' '.join(cv2.getBuildInformation().split())
